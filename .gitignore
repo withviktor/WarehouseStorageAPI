@@ -1,0 +1,6 @@
+warehouse.db
+warehouse.db-shm
+warehouse.db-wal
+
+bin
+obj
