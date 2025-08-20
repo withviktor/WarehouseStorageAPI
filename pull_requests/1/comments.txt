@@ -1,0 +1,1 @@
+Request to modify the authentication implementation to remove public registration and instead create an initial admin user that can manage other users.
