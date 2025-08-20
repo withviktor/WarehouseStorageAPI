@@ -3,7 +3,6 @@ using WarehouseStorageAPI.Models;
 
 namespace WarehouseStorageAPI.Data;
 
-
 public class WarehouseContext : DbContext
 {
     public WarehouseContext(DbContextOptions<WarehouseContext> options) 
@@ -11,6 +10,8 @@ public class WarehouseContext : DbContext
 
     public DbSet<StorageItem> StorageItems { get; set; }
     public DbSet<InventoryTransaction> InventoryTransactions { get; set; }
+    public DbSet<User> Users { get; set; }
+    public DbSet<UserAction> UserActions { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -28,43 +29,30 @@ public class WarehouseContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasOne(e => e.StorageItem)
-                  .WithMany()
-                  .HasForeignKey(e => e.StorageItemId)
-                  .OnDelete(DeleteBehavior.Cascade);
+                .WithMany()
+                .HasForeignKey(e => e.StorageItemId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // Seed data with static dates
-        modelBuilder.Entity<StorageItem>().HasData(
-            new StorageItem
-            {
-                Id = 1,
-                Name = "Sample Item",
-                SKU = "SAMPLE001",
-                Quantity = 100,
-                Location = "A1-01",
-                LedZone = 1,
-                Description = "Sample warehouse item",
-                Price = 29.99m,
-                Category = "Electronics",
-                CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                LastUpdated = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                IsActive = true
-            },
-            new StorageItem
-            {
-                Id = 2,
-                Name = "Test Widget",
-                SKU = "WIDGET001",
-                Quantity = 50,
-                Location = "A2-01",
-                LedZone = 2,
-                Description = "Test widget for demo",
-                Price = 15.50m,
-                Category = "Hardware",
-                CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                LastUpdated = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                IsActive = true
-            }
-        );
+        // Configure User
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId).IsUnique();
+            entity.Property(e => e.Role).HasConversion<int>();
+        });
+
+        // Configure UserAction
+        modelBuilder.Entity<UserAction>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.UserActions)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.Timestamp);
+        });
+
+        // No HasData calls - all seeding moved to DatabaseSeeder
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WarehouseStorageAPI.Data;
 
@@ -10,9 +11,11 @@ using WarehouseStorageAPI.Data;
 namespace WarehouseStorageAPI.Migrations
 {
     [DbContext(typeof(WarehouseContext))]
-    partial class WarehouseContextModelSnapshot : ModelSnapshot
+    [Migration("20250820080012_AddAuthenticationTables")]
+    partial class AddAuthenticationTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
@@ -108,6 +111,23 @@ namespace WarehouseStorageAPI.Migrations
                         .IsUnique();
 
                     b.ToTable("StorageItems");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Category = "Electronics",
+                            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Sample warehouse item",
+                            IsActive = true,
+                            LastUpdated = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            LedZone = 1,
+                            Location = "A1-01",
+                            Name = "Sample Item",
+                            Price = 29.99m,
+                            Quantity = 100,
+                            SKU = "SAMPLE001"
+                        });
                 });
 
             modelBuilder.Entity("WarehouseStorageAPI.Models.User", b =>
@@ -154,6 +174,20 @@ namespace WarehouseStorageAPI.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            FirstName = "Admin",
+                            IsActive = true,
+                            LastLogin = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            LastName = "User",
+                            PasswordHash = "ncRvoNQV64L8QfURatobD/EsZzu9czq0DB9FCvdeRmo=",
+                            Role = 1,
+                            UserId = "1000001"
+                        });
                 });
 
             modelBuilder.Entity("WarehouseStorageAPI.Models.UserAction", b =>

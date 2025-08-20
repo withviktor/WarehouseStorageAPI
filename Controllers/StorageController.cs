@@ -4,25 +4,30 @@ using WarehouseStorageAPI.Data;
 using WarehouseStorageAPI.DTOs;
 using WarehouseStorageAPI.Models;
 using WarehouseStorageAPI.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace WarehouseStorageAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize] // Require authentication for all storage operations
 public class StorageController : ControllerBase
 {
     private readonly WarehouseContext _context;
     private readonly ILedControllerService _ledService;
     private readonly ILogger<StorageController> _logger;
+    private readonly IUserActionService _userActionService;
 
     public StorageController(
         WarehouseContext context,
         ILedControllerService ledService,
-        ILogger<StorageController> logger)
+        ILogger<StorageController> logger,
+        IUserActionService userActionService)
     {
         _context = context;
         _ledService = ledService;
         _logger = logger;
+        _userActionService = userActionService;
     }
 
     [HttpGet]
@@ -87,6 +92,16 @@ public class StorageController : ControllerBase
         // Log transaction
         await LogTransaction(item.Id, "IN", dto.Quantity, 0, dto.Quantity, "Initial stock");
 
+        // Log user action
+        await _userActionService.LogActionAsync(
+            User,
+            "Create Storage Item",
+            $"Created item: {item.Name} (SKU: {item.SKU})",
+            "StorageItem",
+            item.Id,
+            HttpContext.Connection.RemoteIpAddress?.ToString()
+        );
+
         return CreatedAtAction(nameof(GetItem), new { id = item.Id }, item);
     }
 
@@ -98,25 +113,46 @@ public class StorageController : ControllerBase
             return NotFound();
 
         var previousQuantity = item.Quantity;
+        var changes = new List<string>();
 
-        // Update fields if provided
-        if (!string.IsNullOrEmpty(dto.Name))
+        // Update fields if provided and track changes
+        if (!string.IsNullOrEmpty(dto.Name) && dto.Name != item.Name)
+        {
+            changes.Add($"Name: {item.Name} → {dto.Name}");
             item.Name = dto.Name;
-        if (dto.Quantity.HasValue)
+        }
+        if (dto.Quantity.HasValue && dto.Quantity.Value != item.Quantity)
+        {
+            changes.Add($"Quantity: {item.Quantity} → {dto.Quantity.Value}");
             item.Quantity = dto.Quantity.Value;
-        if (!string.IsNullOrEmpty(dto.Location))
+        }
+        if (!string.IsNullOrEmpty(dto.Location) && dto.Location != item.Location)
+        {
+            changes.Add($"Location: {item.Location} → {dto.Location}");
             item.Location = dto.Location;
-        if (dto.LedZone.HasValue)
+        }
+        if (dto.LedZone.HasValue && dto.LedZone.Value != item.LedZone)
+        {
+            changes.Add($"LED Zone: {item.LedZone} → {dto.LedZone.Value}");
             item.LedZone = dto.LedZone.Value;
-        if (dto.Description != null)
+        }
+        if (dto.Description != null && dto.Description != item.Description)
+        {
+            changes.Add($"Description updated");
             item.Description = dto.Description;
-        if (dto.Price.HasValue)
+        }
+        if (dto.Price.HasValue && dto.Price.Value != item.Price)
+        {
+            changes.Add($"Price: {item.Price} → {dto.Price.Value}");
             item.Price = dto.Price.Value;
-        if (dto.Category != null)
+        }
+        if (dto.Category != null && dto.Category != item.Category)
+        {
+            changes.Add($"Category: {item.Category} → {dto.Category}");
             item.Category = dto.Category;
+        }
 
         item.LastUpdated = DateTime.UtcNow;
-
         await _context.SaveChangesAsync();
 
         // Log quantity change if applicable
@@ -125,6 +161,19 @@ public class StorageController : ControllerBase
             var transactionType = dto.Quantity.Value > previousQuantity ? "IN" : "OUT";
             var quantityChange = Math.Abs(dto.Quantity.Value - previousQuantity);
             await LogTransaction(id, transactionType, quantityChange, previousQuantity, dto.Quantity.Value, "Manual adjustment");
+        }
+
+        // Log user action
+        if (changes.Any())
+        {
+            await _userActionService.LogActionAsync(
+                User,
+                "Update Storage Item",
+                $"Updated item {item.Name} (SKU: {item.SKU}): {string.Join(", ", changes)}",
+                "StorageItem",
+                item.Id,
+                HttpContext.Connection.RemoteIpAddress?.ToString()
+            );
         }
 
         return NoContent();
@@ -152,6 +201,16 @@ public class StorageController : ControllerBase
         await _context.SaveChangesAsync();
         await LogTransaction(id, dto.TransactionType, Math.Abs(newQuantity - previousQuantity), previousQuantity, newQuantity, dto.Notes);
 
+        // Log user action
+        await _userActionService.LogActionAsync(
+            User,
+            "Adjust Inventory",
+            $"Adjusted inventory for {item.Name} (SKU: {item.SKU}): {dto.TransactionType} {Math.Abs(newQuantity - previousQuantity)} units. {dto.Notes}",
+            "StorageItem",
+            item.Id,
+            HttpContext.Connection.RemoteIpAddress?.ToString()
+        );
+
         return Ok(new { PreviousQuantity = previousQuantity, NewQuantity = newQuantity });
     }
 
@@ -167,6 +226,17 @@ public class StorageController : ControllerBase
             return StatusCode(500, "Failed to control LED");
 
         _logger.LogInformation($"Highlighted item {item.SKU} at location {item.Location}");
+
+        // Log user action
+        await _userActionService.LogActionAsync(
+            User,
+            "Highlight Item",
+            $"Highlighted item {item.Name} (SKU: {item.SKU}) at location {item.Location} with color {color}",
+            "StorageItem",
+            item.Id,
+            HttpContext.Connection.RemoteIpAddress?.ToString()
+        );
+
         return Ok(new { Message = $"Highlighted {item.Name} at {item.Location}" });
     }
 
@@ -180,6 +250,16 @@ public class StorageController : ControllerBase
         item.IsActive = false;
         item.LastUpdated = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        // Log user action
+        await _userActionService.LogActionAsync(
+            User,
+            "Delete Storage Item",
+            $"Deleted item {item.Name} (SKU: {item.SKU})",
+            "StorageItem",
+            item.Id,
+            HttpContext.Connection.RemoteIpAddress?.ToString()
+        );
 
         return NoContent();
     }
