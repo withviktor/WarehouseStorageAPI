@@ -4,25 +4,31 @@ using WarehouseStorageAPI.Data;
 using WarehouseStorageAPI.DTOs;
 using WarehouseStorageAPI.Models;
 using WarehouseStorageAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace WarehouseStorageAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class StorageController : ControllerBase
 {
     private readonly WarehouseContext _context;
     private readonly ILedControllerService _ledService;
     private readonly ILogger<StorageController> _logger;
+    private readonly IActivityLogService _activityLogService;
 
     public StorageController(
         WarehouseContext context,
         ILedControllerService ledService,
-        ILogger<StorageController> logger)
+        ILogger<StorageController> logger,
+        IActivityLogService activityLogService)
     {
         _context = context;
         _ledService = ledService;
         _logger = logger;
+        _activityLogService = activityLogService;
     }
 
     [HttpGet]
@@ -87,6 +93,20 @@ public class StorageController : ControllerBase
         // Log transaction
         await LogTransaction(item.Id, "IN", dto.Quantity, 0, dto.Quantity, "Initial stock");
 
+        // Log item creation activity
+        var userId = GetCurrentUserId();
+        if (userId.HasValue)
+        {
+            await _activityLogService.LogStorageOperationAsync(
+                userId.Value,
+                "CREATE_ITEM",
+                item.Id,
+                $"Created new item: {item.Name} ({item.SKU}) with {item.Quantity} units at {item.Location}",
+                GetClientIpAddress(),
+                GetUserAgent()
+            );
+        }
+
         return CreatedAtAction(nameof(GetItem), new { id = item.Id }, item);
     }
 
@@ -98,22 +118,44 @@ public class StorageController : ControllerBase
             return NotFound();
 
         var previousQuantity = item.Quantity;
+        var changes = new List<string>();
 
         // Update fields if provided
-        if (!string.IsNullOrEmpty(dto.Name))
+        if (!string.IsNullOrEmpty(dto.Name) && dto.Name != item.Name)
+        {
+            changes.Add($"Name: {item.Name} → {dto.Name}");
             item.Name = dto.Name;
-        if (dto.Quantity.HasValue)
+        }
+        if (dto.Quantity.HasValue && dto.Quantity.Value != item.Quantity)
+        {
+            changes.Add($"Quantity: {item.Quantity} → {dto.Quantity.Value}");
             item.Quantity = dto.Quantity.Value;
-        if (!string.IsNullOrEmpty(dto.Location))
+        }
+        if (!string.IsNullOrEmpty(dto.Location) && dto.Location != item.Location)
+        {
+            changes.Add($"Location: {item.Location} → {dto.Location}");
             item.Location = dto.Location;
-        if (dto.LedZone.HasValue)
+        }
+        if (dto.LedZone.HasValue && dto.LedZone.Value != item.LedZone)
+        {
+            changes.Add($"LED Zone: {item.LedZone} → {dto.LedZone.Value}");
             item.LedZone = dto.LedZone.Value;
-        if (dto.Description != null)
+        }
+        if (dto.Description != null && dto.Description != item.Description)
+        {
+            changes.Add($"Description: {item.Description} → {dto.Description}");
             item.Description = dto.Description;
-        if (dto.Price.HasValue)
+        }
+        if (dto.Price.HasValue && dto.Price.Value != item.Price)
+        {
+            changes.Add($"Price: ${item.Price} → ${dto.Price.Value}");
             item.Price = dto.Price.Value;
-        if (dto.Category != null)
+        }
+        if (dto.Category != null && dto.Category != item.Category)
+        {
+            changes.Add($"Category: {item.Category} → {dto.Category}");
             item.Category = dto.Category;
+        }
 
         item.LastUpdated = DateTime.UtcNow;
 
@@ -125,6 +167,20 @@ public class StorageController : ControllerBase
             var transactionType = dto.Quantity.Value > previousQuantity ? "IN" : "OUT";
             var quantityChange = Math.Abs(dto.Quantity.Value - previousQuantity);
             await LogTransaction(id, transactionType, quantityChange, previousQuantity, dto.Quantity.Value, "Manual adjustment");
+        }
+
+        // Log item update activity
+        var userId = GetCurrentUserId();
+        if (userId.HasValue && changes.Any())
+        {
+            await _activityLogService.LogStorageOperationAsync(
+                userId.Value,
+                "UPDATE_ITEM",
+                id,
+                $"Updated item {item.Name} ({item.SKU}): {string.Join(", ", changes)}",
+                GetClientIpAddress(),
+                GetUserAgent()
+            );
         }
 
         return NoContent();
@@ -167,6 +223,21 @@ public class StorageController : ControllerBase
             return StatusCode(500, "Failed to control LED");
 
         _logger.LogInformation($"Highlighted item {item.SKU} at location {item.Location}");
+
+        // Log highlight activity
+        var userId = GetCurrentUserId();
+        if (userId.HasValue)
+        {
+            await _activityLogService.LogStorageOperationAsync(
+                userId.Value,
+                "HIGHLIGHT_ITEM",
+                id,
+                $"Highlighted item {item.Name} ({item.SKU}) at {item.Location} with {color} color",
+                GetClientIpAddress(),
+                GetUserAgent()
+            );
+        }
+
         return Ok(new { Message = $"Highlighted {item.Name} at {item.Location}" });
     }
 
@@ -180,6 +251,20 @@ public class StorageController : ControllerBase
         item.IsActive = false;
         item.LastUpdated = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        // Log item deletion activity
+        var userId = GetCurrentUserId();
+        if (userId.HasValue)
+        {
+            await _activityLogService.LogStorageOperationAsync(
+                userId.Value,
+                "DELETE_ITEM",
+                id,
+                $"Deactivated item: {item.Name} ({item.SKU}) at {item.Location}",
+                GetClientIpAddress(),
+                GetUserAgent()
+            );
+        }
 
         return NoContent();
     }
@@ -224,6 +309,7 @@ public class StorageController : ControllerBase
 
     private async Task LogTransaction(int itemId, string type, int quantity, int previousQty, int newQty, string? notes)
     {
+        var userId = GetCurrentUserId();
         var transaction = new InventoryTransaction
         {
             StorageItemId = itemId,
@@ -231,10 +317,49 @@ public class StorageController : ControllerBase
             Quantity = quantity,
             PreviousQuantity = previousQty,
             NewQuantity = newQty,
-            Notes = notes
+            Notes = notes,
+            UserId = userId
         };
 
         _context.InventoryTransactions.Add(transaction);
         await _context.SaveChangesAsync();
+
+        // Log user activity
+        if (userId.HasValue)
+        {
+            var item = await _context.StorageItems.FindAsync(itemId);
+            var details = $"{type.ToUpper()} {quantity} units of {item?.Name} ({item?.SKU}). Previous: {previousQty}, New: {newQty}";
+            if (!string.IsNullOrEmpty(notes)) details += $". Notes: {notes}";
+            
+            await _activityLogService.LogStorageOperationAsync(
+                userId.Value, 
+                $"INVENTORY_{type.ToUpper()}", 
+                itemId, 
+                details,
+                GetClientIpAddress(),
+                GetUserAgent()
+            );
+        }
+    }
+
+    private int? GetCurrentUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return int.TryParse(userIdClaim, out var userId) ? userId : null;
+    }
+
+    private string GetClientIpAddress()
+    {
+        var ipAddress = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (string.IsNullOrEmpty(ipAddress))
+        {
+            ipAddress = Request.HttpContext.Connection.RemoteIpAddress?.ToString();
+        }
+        return ipAddress ?? "Unknown";
+    }
+
+    private string GetUserAgent()
+    {
+        return Request.Headers.UserAgent.ToString();
     }
 }

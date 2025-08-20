@@ -11,5 +11,6 @@ public class InventoryTransaction
     public int NewQuantity { get; set; }
     public string? Notes { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public string? UserId { get; set; }
+    public int? UserId { get; set; }
+    public User? User { get; set; }
 }
